@@ -26,18 +26,16 @@ namespace util {
 // ── Bit intrinsics ───────────────────────────────────────────────────────────
 
 /// Population count (number of set bits) for a 64-bit word.
-[[nodiscard]] PULSE_FORCE_INLINE constexpr int popcount64(uint64_t x) noexcept {
+[[nodiscard]] PULSE_FORCE_INLINE int popcount64(uint64_t x) noexcept {
 #if defined(PULSE_COMPILER_MSVC)
-    // MSVC: use __popcnt64 intrinsic (available with /arch:AVX2 on x64)
     #if defined(_M_X64) || defined(_M_AMD64)
-        if (!std::is_constant_evaluated()) {
-            return static_cast<int>(__popcnt64(x));
-        }
+        return static_cast<int>(__popcnt64(x));
+    #else
+        // 32-bit MSVC fallback
+        int count = 0;
+        while (x) { x &= (x - 1); count++; }
+        return count;
     #endif
-    // Constexpr fallback
-    int count = 0;
-    while (x) { x &= (x - 1); count++; }
-    return count;
 #elif defined(PULSE_COMPILER_GCC) || defined(PULSE_COMPILER_CLANG)
     return __builtin_popcountll(x);
 #else
@@ -49,20 +47,18 @@ namespace util {
 
 /// Count trailing zeros (index of lowest set bit) for a 64-bit word.
 /// Undefined if x == 0.
-[[nodiscard]] PULSE_FORCE_INLINE constexpr int ctz64(uint64_t x) noexcept {
+[[nodiscard]] PULSE_FORCE_INLINE int ctz64(uint64_t x) noexcept {
     PULSE_ASSERT(x != 0);
 #if defined(PULSE_COMPILER_MSVC)
     #if defined(_M_X64) || defined(_M_AMD64)
-        if (!std::is_constant_evaluated()) {
-            unsigned long idx;
-            _BitScanForward64(&idx, x);
-            return static_cast<int>(idx);
-        }
+        unsigned long idx;
+        _BitScanForward64(&idx, x);
+        return static_cast<int>(idx);
+    #else
+        int n = 0;
+        while ((x & 1) == 0) { x >>= 1; n++; }
+        return n;
     #endif
-    // Constexpr fallback
-    int n = 0;
-    while ((x & 1) == 0) { x >>= 1; n++; }
-    return n;
 #elif defined(PULSE_COMPILER_GCC) || defined(PULSE_COMPILER_CLANG)
     return __builtin_ctzll(x);
 #else
