@@ -29,17 +29,40 @@ target_include_directories(pulse_math INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# ── Memory module (header-only for now) ────────────────
+add_library(pulse_memory INTERFACE)
+target_include_directories(pulse_memory INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_memory INTERFACE pulse_math)
+
+# ── Utilities module ──────────────────────────────────
+add_library(pulse_utilities INTERFACE)
+target_include_directories(pulse_utilities INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_utilities INTERFACE pulse_math pulse_memory)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
+    src/memory/memory_stub.cpp
+    src/utilities/utilities_stub.cpp
+    src/utilities/profiler.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
 if(PULSE_BUILD_TESTS)
     add_executable(pulse_math_tests tests/math/test_math.cpp)
     target_link_libraries(pulse_math_tests PRIVATE pulse_math)
+
+    add_executable(pulse_memory_tests tests/memory/test_memory.cpp)
+    target_link_libraries(pulse_memory_tests PRIVATE pulse_memory)
+
+    add_executable(pulse_utilities_tests tests/utilities/test_utilities.cpp)
+    target_link_libraries(pulse_utilities_tests PRIVATE pulse_utilities)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -47,4 +70,10 @@ option(PULSE_BUILD_BENCHMARKS "Build Pulse benchmarks" ON)
 if(PULSE_BUILD_BENCHMARKS)
     add_executable(pulse_math_bench benchmarks/math_bench.cpp)
     target_link_libraries(pulse_math_bench PRIVATE pulse_math)
+
+    add_executable(pulse_memory_bench benchmarks/memory_bench.cpp)
+    target_link_libraries(pulse_memory_bench PRIVATE pulse_memory)
+
+    add_executable(pulse_utilities_bench benchmarks/utilities_bench.cpp)
+    target_link_libraries(pulse_utilities_bench PRIVATE pulse_utilities)
 endif()
