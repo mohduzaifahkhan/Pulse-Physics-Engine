@@ -43,14 +43,26 @@ target_include_directories(pulse_utilities INTERFACE
 )
 target_link_libraries(pulse_utilities INTERFACE pulse_math pulse_memory)
 
+# ── Jobs module ────────────────────────────────────────
+add_library(pulse_jobs INTERFACE)
+target_include_directories(pulse_jobs INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_jobs INTERFACE pulse_math pulse_memory pulse_utilities)
+
+# Platform thread library
+find_package(Threads REQUIRED)
+target_link_libraries(pulse_jobs INTERFACE Threads::Threads)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
     src/memory/memory_stub.cpp
     src/utilities/utilities_stub.cpp
     src/utilities/profiler.cpp
+    src/jobs/job_system.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -63,6 +75,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_utilities_tests tests/utilities/test_utilities.cpp)
     target_link_libraries(pulse_utilities_tests PRIVATE pulse_utilities)
+
+    add_executable(pulse_jobs_tests tests/jobs/test_jobs.cpp src/jobs/job_system.cpp)
+    target_link_libraries(pulse_jobs_tests PRIVATE pulse_jobs)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -76,4 +91,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_utilities_bench benchmarks/utilities_bench.cpp)
     target_link_libraries(pulse_utilities_bench PRIVATE pulse_utilities)
+
+    add_executable(pulse_jobs_bench benchmarks/jobs_bench.cpp src/jobs/job_system.cpp)
+    target_link_libraries(pulse_jobs_bench PRIVATE pulse_jobs)
 endif()
