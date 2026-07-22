@@ -61,6 +61,13 @@ target_include_directories(pulse_shapes INTERFACE
 )
 target_link_libraries(pulse_shapes INTERFACE pulse_math)
 
+# ── BroadPhase module (header-only) ──────────────────
+add_library(pulse_broadphase INTERFACE)
+target_include_directories(pulse_broadphase INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_broadphase INTERFACE pulse_shapes pulse_math pulse_memory)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -69,8 +76,9 @@ add_library(pulse STATIC
     src/utilities/profiler.cpp
     src/jobs/job_system.cpp
     src/shapes/shapes_stub.cpp
+    src/broadphase/broadphase_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -89,6 +97,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_shapes_tests tests/shapes/test_shapes.cpp)
     target_link_libraries(pulse_shapes_tests PRIVATE pulse_shapes)
+
+    add_executable(pulse_broadphase_tests tests/broadphase/test_broadphase.cpp)
+    target_link_libraries(pulse_broadphase_tests PRIVATE pulse_broadphase)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -108,4 +119,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_shapes_bench benchmarks/shapes_bench.cpp)
     target_link_libraries(pulse_shapes_bench PRIVATE pulse_shapes)
+
+    add_executable(pulse_broadphase_bench benchmarks/broadphase_bench.cpp)
+    target_link_libraries(pulse_broadphase_bench PRIVATE pulse_broadphase)
 endif()
