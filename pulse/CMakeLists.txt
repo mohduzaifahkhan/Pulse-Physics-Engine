@@ -54,6 +54,13 @@ target_link_libraries(pulse_jobs INTERFACE pulse_math pulse_memory pulse_utiliti
 find_package(Threads REQUIRED)
 target_link_libraries(pulse_jobs INTERFACE Threads::Threads)
 
+# ── Shapes module (header-only) ────────────────────────
+add_library(pulse_shapes INTERFACE)
+target_include_directories(pulse_shapes INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_shapes INTERFACE pulse_math)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -61,8 +68,9 @@ add_library(pulse STATIC
     src/utilities/utilities_stub.cpp
     src/utilities/profiler.cpp
     src/jobs/job_system.cpp
+    src/shapes/shapes_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -78,6 +86,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_jobs_tests tests/jobs/test_jobs.cpp src/jobs/job_system.cpp)
     target_link_libraries(pulse_jobs_tests PRIVATE pulse_jobs)
+
+    add_executable(pulse_shapes_tests tests/shapes/test_shapes.cpp)
+    target_link_libraries(pulse_shapes_tests PRIVATE pulse_shapes)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -94,4 +105,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_jobs_bench benchmarks/jobs_bench.cpp src/jobs/job_system.cpp)
     target_link_libraries(pulse_jobs_bench PRIVATE pulse_jobs)
+
+    add_executable(pulse_shapes_bench benchmarks/shapes_bench.cpp)
+    target_link_libraries(pulse_shapes_bench PRIVATE pulse_shapes)
 endif()
