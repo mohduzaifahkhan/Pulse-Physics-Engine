@@ -181,11 +181,21 @@ namespace sat_detail {
     float minPenetration = math::Infinity;
     int bestAxis = -1;
 
-    // Helper lambda: test one separating axis
-    auto testAxis = [&](float projCenter, float projRadiusA, float projRadiusB, int axisId) -> bool {
+    // Helper lambda: test one separating axis.
+    // isEdgeAxis: if true, applies a small bias so face axes are preferred
+    // over degenerate edge-edge axes (parallel edges produce near-zero
+    // cross products that create artificially tiny penetration values).
+    auto testAxis = [&](float projCenter, float projRadiusA, float projRadiusB,
+                        int axisId, bool isEdgeAxis = false) -> bool {
         float separation = math::fastAbs(projCenter) - projRadiusA - projRadiusB;
         if (separation > 0.0f) return false; // Separated on this axis
         float pen = -separation;
+
+        // For edge axes, skip degenerate cases where the cross product
+        // has near-zero length (parallel edges). The epsilon padding in
+        // absC creates tiny false penetrations for these axes.
+        if (isEdgeAxis && pen < 1.0e-3f) return true; // Not separated, but skip as candidate
+
         if (pen < minPenetration) {
             minPenetration = pen;
             bestAxis = axisId;
@@ -235,55 +245,55 @@ namespace sat_detail {
     // Axis A0 × B0
     if (!testAxis(tA[2] * C[1][0] - tA[1] * C[2][0],
                   heA[1] * absC[2][0] + heA[2] * absC[1][0],
-                  heB[1] * absC[0][2] + heB[2] * absC[0][1], 6))
+                  heB[1] * absC[0][2] + heB[2] * absC[0][1], 6, true))
         return false;
 
     // Axis A0 × B1
     if (!testAxis(tA[2] * C[1][1] - tA[1] * C[2][1],
                   heA[1] * absC[2][1] + heA[2] * absC[1][1],
-                  heB[0] * absC[0][2] + heB[2] * absC[0][0], 7))
+                  heB[0] * absC[0][2] + heB[2] * absC[0][0], 7, true))
         return false;
 
     // Axis A0 × B2
     if (!testAxis(tA[2] * C[1][2] - tA[1] * C[2][2],
                   heA[1] * absC[2][2] + heA[2] * absC[1][2],
-                  heB[0] * absC[0][1] + heB[1] * absC[0][0], 8))
+                  heB[0] * absC[0][1] + heB[1] * absC[0][0], 8, true))
         return false;
 
     // Axis A1 × B0
     if (!testAxis(tA[0] * C[2][0] - tA[2] * C[0][0],
                   heA[0] * absC[2][0] + heA[2] * absC[0][0],
-                  heB[1] * absC[1][2] + heB[2] * absC[1][1], 9))
+                  heB[1] * absC[1][2] + heB[2] * absC[1][1], 9, true))
         return false;
 
     // Axis A1 × B1
     if (!testAxis(tA[0] * C[2][1] - tA[2] * C[0][1],
                   heA[0] * absC[2][1] + heA[2] * absC[0][1],
-                  heB[0] * absC[1][2] + heB[2] * absC[1][0], 10))
+                  heB[0] * absC[1][2] + heB[2] * absC[1][0], 10, true))
         return false;
 
     // Axis A1 × B2
     if (!testAxis(tA[0] * C[2][2] - tA[2] * C[0][2],
                   heA[0] * absC[2][2] + heA[2] * absC[0][2],
-                  heB[0] * absC[1][1] + heB[1] * absC[1][0], 11))
+                  heB[0] * absC[1][1] + heB[1] * absC[1][0], 11, true))
         return false;
 
     // Axis A2 × B0
     if (!testAxis(tA[1] * C[0][0] - tA[0] * C[1][0],
                   heA[0] * absC[1][0] + heA[1] * absC[0][0],
-                  heB[1] * absC[2][2] + heB[2] * absC[2][1], 12))
+                  heB[1] * absC[2][2] + heB[2] * absC[2][1], 12, true))
         return false;
 
     // Axis A2 × B1
     if (!testAxis(tA[1] * C[0][1] - tA[0] * C[1][1],
                   heA[0] * absC[1][1] + heA[1] * absC[0][1],
-                  heB[0] * absC[2][2] + heB[2] * absC[2][0], 13))
+                  heB[0] * absC[2][2] + heB[2] * absC[2][0], 13, true))
         return false;
 
     // Axis A2 × B2
     if (!testAxis(tA[1] * C[0][2] - tA[0] * C[1][2],
                   heA[0] * absC[1][2] + heA[1] * absC[0][2],
-                  heB[0] * absC[2][1] + heB[1] * absC[2][0], 14))
+                  heB[0] * absC[2][1] + heB[1] * absC[2][0], 14, true))
         return false;
 
     // ── All 15 axes failed to separate → boxes overlap ──
@@ -371,18 +381,24 @@ namespace sat_detail {
         const Transform* refTx;
         const Box* incBox;
         const Transform* incTx;
-        Mat3 refRot, incRot;
         bool flip = false;
 
         if (bestAxis < 3) {
-            refBox = &boxA; refTx = &txA; refRot = rotA;
-            incBox = &boxB; incTx = &txB; incRot = rotB;
-            refFaceIdx = (normal.dot(rotA[bestAxis]) > 0.0f) ? bestAxis * 2 : bestAxis * 2 + 1;
+            // A's face is the reference face.
+            // The reference face should face TOWARD B (same direction as contact normal).
+            refBox = &boxA; refTx = &txA;
+            incBox = &boxB; incTx = &txB;
+            float faceDot = normal.dot(rotA[bestAxis]);
+            refFaceIdx = (faceDot > 0.0f) ? bestAxis * 2 : bestAxis * 2 + 1;
         } else {
-            refBox = &boxB; refTx = &txB; refRot = rotB;
-            incBox = &boxA; incTx = &txA; incRot = rotA;
-            refFaceIdx = ((bestAxis - 3) * 2);
-            if (normal.dot(rotB[bestAxis - 3]) < 0.0f) refFaceIdx++;
+            // B's face is the reference face.
+            // The reference face should face TOWARD A (opposite to A→B contact normal).
+            refBox = &boxB; refTx = &txB;
+            incBox = &boxA; incTx = &txA;
+            int bAxis = bestAxis - 3;
+            float faceDot = normal.dot(rotB[bAxis]);
+            // normal points A→B, so B's face facing A has negative dot with normal
+            refFaceIdx = (faceDot < 0.0f) ? bAxis * 2 : bAxis * 2 + 1;
             flip = true;
         }
 
@@ -391,10 +407,9 @@ namespace sat_detail {
         Vec3 refFaceLocalNormal = sat_detail::getBoxFaceVertices(
             refBox->halfExtents, refFaceIdx, refFaceVerts);
 
-        // Transform ref face vertices to world space
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 4; ++i)
             refFaceVerts[i] = refTx->transformPoint(refFaceVerts[i]);
-        }
+
         Vec3 refNormalWorld = refTx->transformDirection(refFaceLocalNormal);
 
         // Find incident face: the face on incBox most anti-parallel to refNormalWorld
@@ -414,18 +429,24 @@ namespace sat_detail {
         // Get incident face vertices in world space
         Vec3 incFaceVerts[4];
         sat_detail::getBoxFaceVertices(incBox->halfExtents, incFaceIdx, incFaceVerts);
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 4; ++i)
             incFaceVerts[i] = incTx->transformPoint(incFaceVerts[i]);
-        }
 
-        // Clip incident face against the 4 side planes of the reference face
-        Vec3 buf1[8], buf2[8];
-        for (int i = 0; i < 4; ++i) buf1[i] = incFaceVerts[i];
+        // Clip incident face against the 4 side planes of the reference face.
+        // Use explicit buffer tracking to avoid ping-pong bugs when clips are skipped.
+        Vec3 bufA[8], bufB[8];
+        Vec3* currentBuf = bufA;
+        Vec3* otherBuf = bufB;
+        for (int i = 0; i < 4; ++i) currentBuf[i] = incFaceVerts[i];
         uint32_t count = 4;
 
-        for (int i = 0; i < 4; ++i) {
-            Vec3 edgeStart = refFaceVerts[i];
-            Vec3 edgeEnd = refFaceVerts[(i + 1) % 4];
+        // Compute the reference face center for orientation checking
+        Vec3 refCenter = (refFaceVerts[0] + refFaceVerts[1] +
+                          refFaceVerts[2] + refFaceVerts[3]) * 0.25f;
+
+        for (int edge = 0; edge < 4; ++edge) {
+            Vec3 edgeStart = refFaceVerts[edge];
+            Vec3 edgeEnd = refFaceVerts[(edge + 1) % 4];
             Vec3 edgeDir = edgeEnd - edgeStart;
             Vec3 clipNormal = edgeDir.cross(refNormalWorld);
             float clipLen = clipNormal.length();
@@ -433,30 +454,40 @@ namespace sat_detail {
             clipNormal = clipNormal * (1.0f / clipLen);
             float clipOffset = clipNormal.dot(edgeStart);
 
-            Vec3* src = (i % 2 == 0) ? buf1 : buf2;
-            Vec3* dst = (i % 2 == 0) ? buf2 : buf1;
-            count = sat_detail::clipPolygonAgainstPlane(src, count, dst, clipNormal, clipOffset);
+            // Ensure the clip normal points INWARD (toward the face center).
+            // If the face center is "outside" (dist > 0), flip the plane.
+            float centerDist = clipNormal.dot(refCenter) - clipOffset;
+            if (centerDist > 0.0f) {
+                clipNormal = -clipNormal;
+                clipOffset = -clipOffset;
+            }
+
+            count = sat_detail::clipPolygonAgainstPlane(
+                currentBuf, count, otherBuf, clipNormal, clipOffset);
+
+            // Swap: otherBuf now holds the output, becomes current for next clip
+            Vec3* tmp = currentBuf;
+            currentBuf = otherBuf;
+            otherBuf = tmp;
         }
 
-        // The last clip writes to dst. For i=3 (odd), dst=buf1.
-        Vec3* clipped = buf1;
-
+        // currentBuf now holds the final clipped polygon
         // Project clipped points onto the reference face plane and generate contacts
         float refPlaneOffset = refNormalWorld.dot(refFaceVerts[0]);
 
         for (uint32_t i = 0; i < count && manifold.numContacts < ContactManifold::MaxContacts; ++i) {
-            float dist = clipped[i].dot(refNormalWorld) - refPlaneOffset;
+            float dist = currentBuf[i].dot(refNormalWorld) - refPlaneOffset;
             if (dist <= math::BigEpsilon) {
                 // Contact point is at or below the reference face
-                Vec3 contactOnRef = clipped[i] - refNormalWorld * dist;
-                Vec3 contactOnInc = clipped[i];
+                Vec3 contactOnRef = currentBuf[i] - refNormalWorld * dist;
+                Vec3 contactOnInc = currentBuf[i];
 
                 Vec3 pointA = flip ? contactOnInc : contactOnRef;
                 Vec3 pointB = flip ? contactOnRef : contactOnInc;
 
-                // Use the SAT-computed penetration depth, not the clip distance,
-                // since face-face contacts have near-zero clip distance but
-                // the actual penetration is the SAT minimum overlap.
+                // Use the SAT-computed penetration depth as a floor value.
+                // The clip distance gives the per-vertex depth, but for face-face
+                // contacts it may be near-zero. minPenetration is the correct depth.
                 float pen = math::fastMax(minPenetration, -dist);
                 manifold.addPoint(pointA, pointB, normal, pen);
             }

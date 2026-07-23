@@ -38,8 +38,9 @@ static double benchmarkMs(auto&& fn, uint32_t iterations) {
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-#define BENCH(name, iterations, fn) \
+#define BENCH(name, iterations, ...) \
     do { \
+        auto fn = __VA_ARGS__; \
         double ms = benchmarkMs(fn, iterations); \
         double nsPerOp = (ms * 1000000.0) / static_cast<double>(iterations); \
         double opsPerSec = static_cast<double>(iterations) / (ms / 1000.0); \

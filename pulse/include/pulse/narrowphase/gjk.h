@@ -54,11 +54,9 @@ namespace gjk_detail {
 
         if (ab.dot(ao) > 0.0f) {
             // Origin is between A and B — closest to the edge
-            // Direction: perpendicular to AB toward origin
             Vec3 dir = ab.cross(ao).cross(ab);
             if (dir.lengthSq() < math::Epsilon * math::Epsilon) {
                 // Origin is on the line — use a perpendicular direction
-                // Pick an arbitrary perpendicular
                 if (math::fastAbs(ab.getX()) < 0.9f)
                     dir = ab.cross(Vec3(1.0f, 0.0f, 0.0f));
                 else
@@ -160,6 +158,65 @@ namespace gjk_detail {
         return true;
     }
 
+    // ── Extract closest points from simplex ──────────────────────────────
+
+    /// Extract the closest points on A and B from the current simplex state.
+    /// The simplex has been evolved so its closest feature to the origin
+    /// is represented by its remaining vertices.
+    static inline void extractClosestPoints(const Simplex& simplex, GjkResult& result) noexcept {
+        if (simplex.size == 1) {
+            result.closestOnA = simplex[0].pointA;
+            result.closestOnB = simplex[0].pointB;
+        } else if (simplex.size == 2) {
+            // Closest point on line segment to origin
+            Vec3 a = simplex[1].point;
+            Vec3 b = simplex[0].point;
+            Vec3 ab = b - a;
+            float denom = ab.lengthSq();
+            float t = (denom > math::Epsilon) ?
+                math::clamp(-a.dot(ab) / denom, 0.0f, 1.0f) : 0.0f;
+            result.closestOnA = simplex[1].pointA + (simplex[0].pointA - simplex[1].pointA) * t;
+            result.closestOnB = simplex[1].pointB + (simplex[0].pointB - simplex[1].pointB) * t;
+        } else if (simplex.size >= 3) {
+            // Triangle — barycentric coordinates
+            Vec3 a = simplex[2].point;
+            Vec3 b = simplex[1].point;
+            Vec3 c = simplex[0].point;
+            Vec3 ab = b - a;
+            Vec3 ac = c - a;
+            Vec3 ap = -a; // origin - a
+
+            float d00 = ab.dot(ab);
+            float d01 = ab.dot(ac);
+            float d11 = ac.dot(ac);
+            float d20 = ap.dot(ab);
+            float d21 = ap.dot(ac);
+            float denom = d00 * d11 - d01 * d01;
+
+            if (math::fastAbs(denom) < math::Epsilon) {
+                // Degenerate triangle — use midpoint
+                result.closestOnA = (simplex[0].pointA + simplex[1].pointA + simplex[2].pointA) * (1.0f / 3.0f);
+                result.closestOnB = (simplex[0].pointB + simplex[1].pointB + simplex[2].pointB) * (1.0f / 3.0f);
+            } else {
+                float v = (d11 * d20 - d01 * d21) / denom;
+                float w = (d00 * d21 - d01 * d20) / denom;
+                float u = 1.0f - v - w;
+
+                // Clamp and renormalize
+                u = math::clamp(u, 0.0f, 1.0f);
+                v = math::clamp(v, 0.0f, 1.0f);
+                w = math::clamp(w, 0.0f, 1.0f);
+                float sum = u + v + w;
+                if (sum > math::Epsilon) { u /= sum; v /= sum; w /= sum; }
+
+                result.closestOnA = simplex[2].pointA * u + simplex[1].pointA * v + simplex[0].pointA * w;
+                result.closestOnB = simplex[2].pointB * u + simplex[1].pointB * v + simplex[0].pointB * w;
+            }
+        }
+
+        result.distance = (result.closestOnA - result.closestOnB).length();
+    }
+
 } // namespace gjk_detail
 
 // ── GJK query ────────────────────────────────────────────────────────────────
@@ -210,72 +267,30 @@ static inline void gjkQuery(
     for (uint32_t iter = 0; iter < maxIter; ++iter) {
         result.iterations = iter + 1;
 
-        // Get new support point
+        // Get new support point in the search direction
         sp = gjk_detail::minkowskiSupport(shapeA, txA, shapeB, txB, direction);
 
-        // Check if we passed the origin
+        // Project new point onto search direction
         float progress = sp.point.dot(direction);
+
+        // Add the new point to the simplex ALWAYS — even if we detect
+        // separation, the extra point gives a better closest-distance estimate.
+        simplex.addVertex(sp);
+
         if (progress < 0.0f) {
-            // Did not pass the origin — shapes are separated
-            result.status = GjkStatus::Separated;
-
-            // Extract closest points from the simplex
-            // Use the last search direction as the separation axis
-            float dist = direction.length();
-            if (dist > math::Epsilon) {
-                Vec3 normalizedDir = direction * (1.0f / dist);
-
-                // Compute closest points based on simplex size
-                if (simplex.size == 1) {
-                    result.closestOnA = simplex[0].pointA;
-                    result.closestOnB = simplex[0].pointB;
-                } else if (simplex.size == 2) {
-                    // Closest point on line segment to origin
-                    Vec3 a = simplex[1].point;
-                    Vec3 b = simplex[0].point;
-                    Vec3 ab = b - a;
-                    float t = math::clamp(-a.dot(ab) / (ab.lengthSq() + math::Epsilon), 0.0f, 1.0f);
-                    result.closestOnA = simplex[1].pointA + (simplex[0].pointA - simplex[1].pointA) * t;
-                    result.closestOnB = simplex[1].pointB + (simplex[0].pointB - simplex[1].pointB) * t;
-                } else {
-                    // Triangle — barycentric coordinates
-                    Vec3 a = simplex[2].point;
-                    Vec3 b = simplex[1].point;
-                    Vec3 c = simplex[0].point;
-                    Vec3 ab = b - a;
-                    Vec3 ac = c - a;
-                    Vec3 ap = -a;
-
-                    float d00 = ab.dot(ab);
-                    float d01 = ab.dot(ac);
-                    float d11 = ac.dot(ac);
-                    float d20 = ap.dot(ab);
-                    float d21 = ap.dot(ac);
-                    float denom = d00 * d11 - d01 * d01;
-
-                    float v = (d11 * d20 - d01 * d21) / (denom + math::Epsilon);
-                    float w = (d00 * d21 - d01 * d20) / (denom + math::Epsilon);
-                    float u = 1.0f - v - w;
-
-                    v = math::clamp(v, 0.0f, 1.0f);
-                    w = math::clamp(w, 0.0f, 1.0f);
-                    u = math::clamp(u, 0.0f, 1.0f);
-                    float sum = u + v + w;
-                    if (sum > math::Epsilon) { u /= sum; v /= sum; w /= sum; }
-
-                    result.closestOnA = simplex[2].pointA * u + simplex[1].pointA * v + simplex[0].pointA * w;
-                    result.closestOnB = simplex[2].pointB * u + simplex[1].pointB * v + simplex[0].pointB * w;
-                }
-
-                result.distance = (result.closestOnA - result.closestOnB).length();
+            // The new support did not pass the origin → shapes are separated.
+            // Evolve the simplex to find the closest feature, then extract distance.
+            if (simplex.size == 2) {
+                direction = gjk_detail::doSimplex2(simplex);
+            } else if (simplex.size == 3) {
+                direction = gjk_detail::doSimplex3(simplex);
             }
+            result.status = GjkStatus::Separated;
+            gjk_detail::extractClosestPoints(simplex, result);
             return;
         }
 
-        // Add the new point to the simplex
-        simplex.addVertex(sp);
-
-        // Evolve the simplex
+        // Evolve the simplex — find the nearest feature to the origin
         switch (simplex.size) {
         case 2:
             direction = gjk_detail::doSimplex2(simplex);
@@ -285,7 +300,7 @@ static inline void gjkQuery(
             break;
         case 4:
             if (gjk_detail::doSimplex4(simplex, direction)) {
-                // Origin is inside the tetrahedron — overlap
+                // Origin is inside the tetrahedron — shapes overlap
                 result.status = GjkStatus::Overlapping;
                 result.distance = 0.0f;
                 return;
@@ -295,16 +310,29 @@ static inline void gjkQuery(
             break;
         }
 
-        // Check for convergence (direction is near-zero)
+        // Check for convergence (direction is near-zero → on simplex boundary)
         if (direction.lengthSq() < math::Epsilon * math::Epsilon) {
             result.status = GjkStatus::Overlapping;
             result.distance = 0.0f;
             return;
         }
+
+        // Distance-mode convergence: if the new support doesn't significantly
+        // improve the closest approach, the simplex has converged.
+        float dirLen = direction.length();
+        if (dirLen > math::Epsilon) {
+            float projMax = progress / dirLen;
+            if (dirLen - projMax < 1.0e-4f) {
+                result.status = GjkStatus::Separated;
+                gjk_detail::extractClosestPoints(simplex, result);
+                return;
+            }
+        }
     }
 
-    // Failed to converge
+    // Max iterations reached — extract best guess
     result.status = GjkStatus::MaxIterations;
+    gjk_detail::extractClosestPoints(simplex, result);
 }
 
 // ── GJK distance query (convenience wrapper) ─────────────────────────────────
