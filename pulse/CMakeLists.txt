@@ -82,6 +82,13 @@ target_include_directories(pulse_contact INTERFACE
 )
 target_link_libraries(pulse_contact INTERFACE pulse_narrowphase pulse_shapes pulse_math)
 
+# ── Solver module (header-only) ──────────────────────
+add_library(pulse_solver INTERFACE)
+target_include_directories(pulse_solver INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_solver INTERFACE pulse_contact pulse_math)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -93,8 +100,9 @@ add_library(pulse STATIC
     src/broadphase/broadphase_stub.cpp
     src/narrowphase/narrowphase_stub.cpp
     src/contact/contact_stub.cpp
+    src/solver/solver_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -122,6 +130,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_contact_tests tests/contact/test_contact.cpp)
     target_link_libraries(pulse_contact_tests PRIVATE pulse_contact)
+
+    add_executable(pulse_solver_tests tests/solver/test_solver.cpp)
+    target_link_libraries(pulse_solver_tests PRIVATE pulse_solver)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -150,4 +161,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_contact_bench benchmarks/contact_bench.cpp)
     target_link_libraries(pulse_contact_bench PRIVATE pulse_contact)
+
+    add_executable(pulse_solver_bench benchmarks/solver_bench.cpp)
+    target_link_libraries(pulse_solver_bench PRIVATE pulse_solver)
 endif()
