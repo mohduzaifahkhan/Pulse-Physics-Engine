@@ -331,10 +331,10 @@ PULSE_FORCE_INLINE void setupLinearRow(JointRow& row,
                                         float baumgarte, float invDt,
                                         const SoftConstraintParams& soft = SoftConstraintParams()) noexcept
 {
-    row.jvA = axis;
-    row.jwA = rA.cross(axis);
-    row.jvB = -axis;
-    row.jwB = -(rB.cross(axis));
+    row.jvA = -axis;
+    row.jwA = -(rA.cross(axis));
+    row.jvB = axis;
+    row.jwB = rB.cross(axis);
 
     float gamma = soft.enabled ? soft.gamma : 0.0f;
     row.effectiveMass = computeJointEffectiveMass(bodyA, bodyB, row, gamma);

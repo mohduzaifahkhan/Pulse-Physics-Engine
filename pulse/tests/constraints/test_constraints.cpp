@@ -890,8 +890,8 @@ static bool test_warm_start_distance() {
     bodies[1].linearVelocity = Vec3::zero();
     bodies[1].angularVelocity = Vec3::zero();
 
-    dc.setWarmStartImpulse(firstImpulse);
     dc.initialize(bodies, 2, config, dt);
+    dc.setWarmStartImpulse(firstImpulse);
     dc.warmStart(bodies);
 
     // After warm start, body should already have some velocity
