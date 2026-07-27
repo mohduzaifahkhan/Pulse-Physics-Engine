@@ -96,6 +96,13 @@ target_include_directories(pulse_constraints INTERFACE
 )
 target_link_libraries(pulse_constraints INTERFACE pulse_solver pulse_math)
 
+# ── RigidBody module (header-only) ───────────────────
+add_library(pulse_rigidbody INTERFACE)
+target_include_directories(pulse_rigidbody INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_rigidbody INTERFACE pulse_math pulse_shapes pulse_memory pulse_utilities pulse_solver)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -109,8 +116,9 @@ add_library(pulse STATIC
     src/contact/contact_stub.cpp
     src/solver/solver_stub.cpp
     src/constraints/constraints_stub.cpp
+    src/rigidbody/rigidbody_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_rigidbody)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -144,6 +152,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_constraints_tests tests/constraints/test_constraints.cpp)
     target_link_libraries(pulse_constraints_tests PRIVATE pulse_constraints)
+
+    add_executable(pulse_rigidbody_tests tests/rigidbody/test_rigidbody.cpp)
+    target_link_libraries(pulse_rigidbody_tests PRIVATE pulse_rigidbody)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -178,4 +189,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_constraints_bench benchmarks/constraints_bench.cpp)
     target_link_libraries(pulse_constraints_bench PRIVATE pulse_constraints)
+
+    add_executable(pulse_rigidbody_bench benchmarks/rigidbody_bench.cpp)
+    target_link_libraries(pulse_rigidbody_bench PRIVATE pulse_rigidbody)
 endif()
