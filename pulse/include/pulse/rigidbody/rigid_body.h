@@ -32,8 +32,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <new>
-
 namespace pulse {
 
 // ── Aligned allocation helpers ───────────────────────────────────────────────
@@ -42,8 +40,16 @@ namespace detail {
 
 inline void* bodyAlignedAlloc(std::size_t size, std::size_t alignment) noexcept {
     if (size == 0) return nullptr;
-#if defined(PULSE_COMPILER_MSVC)
+#if defined(_MSC_VER)
     return _aligned_malloc(size, alignment);
+#elif defined(_WIN32)
+    if (alignment < sizeof(void*)) alignment = sizeof(void*);
+    void* raw = std::malloc(size + alignment + sizeof(void*));
+    if (!raw) return nullptr;
+    std::uintptr_t rawAddr = reinterpret_cast<std::uintptr_t>(raw) + sizeof(void*);
+    std::uintptr_t aligned = (rawAddr + alignment - 1) & ~(alignment - 1);
+    reinterpret_cast<void**>(aligned)[-1] = raw;
+    return reinterpret_cast<void*>(aligned);
 #else
     void* ptr = nullptr;
     if (posix_memalign(&ptr, alignment, size) != 0) return nullptr;
@@ -52,8 +58,11 @@ inline void* bodyAlignedAlloc(std::size_t size, std::size_t alignment) noexcept 
 }
 
 inline void bodyAlignedFree(void* ptr) noexcept {
-#if defined(PULSE_COMPILER_MSVC)
+    if (!ptr) return;
+#if defined(_MSC_VER)
     _aligned_free(ptr);
+#elif defined(_WIN32)
+    std::free(reinterpret_cast<void**>(ptr)[-1]);
 #else
     std::free(ptr);
 #endif
