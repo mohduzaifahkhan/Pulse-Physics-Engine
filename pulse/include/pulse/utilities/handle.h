@@ -121,8 +121,9 @@ struct Handle {
 
 // ── std::hash specialization ─────────────────────────────────────────────────
 
+namespace std {
 template <typename Tag>
-struct std::hash<pulse::util::Handle<Tag>> {
+struct hash<pulse::util::Handle<Tag>> {
     std::size_t operator()(const pulse::util::Handle<Tag>& h) const noexcept {
         // FNV-1a style mixing for good distribution.
         uint64_t v = h.value;
@@ -134,3 +135,4 @@ struct std::hash<pulse::util::Handle<Tag>> {
         return static_cast<std::size_t>(v);
     }
 };
+} // namespace std

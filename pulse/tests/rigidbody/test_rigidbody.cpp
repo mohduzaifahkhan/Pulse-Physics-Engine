@@ -351,7 +351,7 @@ static bool test_apply_force_at_point() {
     Vec3 f = mgr.store().force(idx);
     Vec3 t = mgr.store().torque(idx);
     TEST_ASSERT(approxVec(f, Vec3(0, 10, 0)));
-    TEST_ASSERT(t.lengthSquared() > 0.01f); // Should have torque
+    TEST_ASSERT(t.lengthSq() > 0.01f); // Should have torque
     return true;
 }
 
@@ -392,9 +392,9 @@ static bool test_fixed_rotation_zero_inertia() {
     uint32_t idx = mgr.getIndex(h);
     const Mat3& invI = mgr.store().localInvInertia(idx);
     // All diagonal entries should be zero for fixed rotation.
-    TEST_ASSERT(approx(invI.get(0, 0), 0.0f));
-    TEST_ASSERT(approx(invI.get(1, 1), 0.0f));
-    TEST_ASSERT(approx(invI.get(2, 2), 0.0f));
+    TEST_ASSERT(approx(invI(0, 0), 0.0f));
+    TEST_ASSERT(approx(invI(1, 1), 0.0f));
+    TEST_ASSERT(approx(invI(2, 2), 0.0f));
     return true;
 }
 
@@ -430,9 +430,9 @@ static bool test_world_inertia_identity_rotation() {
     const Mat3& local = mgr.store().localInvInertia(idx);
     const Mat3& world = mgr.store().worldInvInertia(idx);
 
-    TEST_ASSERT(approx(local.get(0, 0), world.get(0, 0)));
-    TEST_ASSERT(approx(local.get(1, 1), world.get(1, 1)));
-    TEST_ASSERT(approx(local.get(2, 2), world.get(2, 2)));
+    TEST_ASSERT(approx(local(0, 0), world(0, 0)));
+    TEST_ASSERT(approx(local(1, 1), world(1, 1)));
+    TEST_ASSERT(approx(local(2, 2), world(2, 2)));
     return true;
 }
 
@@ -455,8 +455,8 @@ static bool test_world_inertia_rotated() {
     const Mat3& world = mgr.store().worldInvInertia(idx);
     // After 90° rotation around Z, X↔Y should swap.
     // Local inverse diag: (1, 0.5, 1/3). After rotation: (~0.5, ~1.0, ~1/3)
-    TEST_ASSERT(std::fabs(world.get(0, 0) - 0.5f) < 0.1f);
-    TEST_ASSERT(std::fabs(world.get(1, 1) - 1.0f) < 0.1f);
+    TEST_ASSERT(std::fabs(world(0, 0) - 0.5f) < 0.1f);
+    TEST_ASSERT(std::fabs(world(1, 1) - 1.0f) < 0.1f);
     return true;
 }
 
@@ -469,9 +469,9 @@ static bool test_world_inertia_static_unchanged() {
 
     // Static body should have zero inertia.
     const Mat3& world = mgr.store().worldInvInertia(idx);
-    TEST_ASSERT(approx(world.get(0, 0), 0.0f));
-    TEST_ASSERT(approx(world.get(1, 1), 0.0f));
-    TEST_ASSERT(approx(world.get(2, 2), 0.0f));
+    TEST_ASSERT(approx(world(0, 0), 0.0f));
+    TEST_ASSERT(approx(world(1, 1), 0.0f));
+    TEST_ASSERT(approx(world(2, 2), 0.0f));
     return true;
 }
 

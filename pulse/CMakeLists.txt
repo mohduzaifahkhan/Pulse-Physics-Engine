@@ -103,6 +103,13 @@ target_include_directories(pulse_rigidbody INTERFACE
 )
 target_link_libraries(pulse_rigidbody INTERFACE pulse_math pulse_shapes pulse_memory pulse_utilities pulse_solver)
 
+# ── Integration module (header-only) ─────────────────
+add_library(pulse_integration INTERFACE)
+target_include_directories(pulse_integration INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_integration INTERFACE pulse_rigidbody pulse_math)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -117,8 +124,9 @@ add_library(pulse STATIC
     src/solver/solver_stub.cpp
     src/constraints/constraints_stub.cpp
     src/rigidbody/rigidbody_stub.cpp
+    src/integration/integration_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_rigidbody)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_rigidbody pulse_integration)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -155,6 +163,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_rigidbody_tests tests/rigidbody/test_rigidbody.cpp)
     target_link_libraries(pulse_rigidbody_tests PRIVATE pulse_rigidbody)
+
+    add_executable(pulse_integration_tests tests/integration/test_integration.cpp)
+    target_link_libraries(pulse_integration_tests PRIVATE pulse_integration)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -192,4 +203,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_rigidbody_bench benchmarks/rigidbody_bench.cpp)
     target_link_libraries(pulse_rigidbody_bench PRIVATE pulse_rigidbody)
+
+    add_executable(pulse_integration_bench benchmarks/integration_bench.cpp)
+    target_link_libraries(pulse_integration_bench PRIVATE pulse_integration)
 endif()
