@@ -110,6 +110,13 @@ target_include_directories(pulse_integration INTERFACE
 )
 target_link_libraries(pulse_integration INTERFACE pulse_rigidbody pulse_math)
 
+# ── World module (header-only) ───────────────────────
+add_library(pulse_world INTERFACE)
+target_include_directories(pulse_world INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pulse_world INTERFACE pulse_integration pulse_rigidbody pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_shapes pulse_math pulse_memory pulse_utilities pulse_jobs)
+
 # ── Main engine library (will grow with each module) ───
 add_library(pulse STATIC
     src/math/math_stub.cpp
@@ -125,8 +132,9 @@ add_library(pulse STATIC
     src/constraints/constraints_stub.cpp
     src/rigidbody/rigidbody_stub.cpp
     src/integration/integration_stub.cpp
+    src/world/world_stub.cpp
 )
-target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_rigidbody pulse_integration)
+target_link_libraries(pulse PUBLIC pulse_math pulse_memory pulse_utilities pulse_jobs pulse_shapes pulse_broadphase pulse_narrowphase pulse_contact pulse_solver pulse_constraints pulse_rigidbody pulse_integration pulse_world)
 
 # ── Tests ──────────────────────────────────────────────
 option(PULSE_BUILD_TESTS "Build Pulse unit tests" ON)
@@ -166,6 +174,9 @@ if(PULSE_BUILD_TESTS)
 
     add_executable(pulse_integration_tests tests/integration/test_integration.cpp)
     target_link_libraries(pulse_integration_tests PRIVATE pulse_integration)
+
+    add_executable(pulse_world_tests tests/world/test_world.cpp)
+    target_link_libraries(pulse_world_tests PRIVATE pulse_world)
 endif()
 
 # ── Benchmarks ─────────────────────────────────────────
@@ -206,4 +217,7 @@ if(PULSE_BUILD_BENCHMARKS)
 
     add_executable(pulse_integration_bench benchmarks/integration_bench.cpp)
     target_link_libraries(pulse_integration_bench PRIVATE pulse_integration)
+
+    add_executable(pulse_world_bench benchmarks/world_bench.cpp)
+    target_link_libraries(pulse_world_bench PRIVATE pulse_world)
 endif()
