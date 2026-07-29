@@ -4,7 +4,7 @@
  *
  * Orchestrates all 12 Pulse subsystems into a single step() call:
  *
- *   1. Apply gravity
+ *   1. Apply gravity to forces
  *   2. Integrate velocities (pre-solver)
  *   3. Update world inertias
  *   4. Update broadphase proxies
@@ -18,7 +18,7 @@
  *  12. Clear forces
  *  13. Fire contact callbacks
  *
- * Thread safety: NOT thread-safe.  External synchronization required.
+ * Thread safety: NOT thread-safe. External synchronization required.
  * The step() call is designed to be called from a single thread; internal
  * island solving may be parallelised via JobSystem in a future update.
  */
@@ -49,7 +49,6 @@
 #include <pulse/contact/contact_common.h>
 #include <pulse/contact/contact_cache.h>
 #include <pulse/contact/contact_manifold_persistent.h>
-#include <pulse/contact/warm_start.h>
 
 #include <pulse/solver/solver_common.h>
 #include <pulse/solver/solver.h>
@@ -111,8 +110,8 @@ public:
     explicit PhysicsWorld(const WorldConfig& config = WorldConfig()) noexcept
         : config_(config),
           bodyManager_(config.maxBodies),
-          broadphase_(config.broadPhaseConfig),
-          contactCache_(config.contactConfig),
+          broadphase_(config.broadPhaseConfig.maxProxies * 2),
+          contactCache_(config.contactConfig.maxCachedPairs),
           islandManager_(config.maxBodies),
           sleepManager_(config.sleepConfig),
           contactCallback_(nullptr),
@@ -136,17 +135,23 @@ public:
             std::malloc(shapeCapacity_ * sizeof(ProxyHandle)));
         PULSE_ASSERT_MSG(proxyHandles_ != nullptr, "PhysicsWorld: proxy array alloc failed");
 
-        // Allocate manifold scratch buffer.
-        maxManifolds_ = config.maxPairs;
-        manifolds_ = static_cast<PersistentManifold*>(
-            std::malloc(maxManifolds_ * sizeof(PersistentManifold)));
-        PULSE_ASSERT_MSG(manifolds_ != nullptr, "PhysicsWorld: manifold array alloc failed");
+        // Allocate overlap pair scratch buffer.
+        maxPairs_ = config.maxPairs;
+        overlapPairs_ = static_cast<OverlapPair*>(
+            std::malloc(maxPairs_ * sizeof(OverlapPair)));
+        PULSE_ASSERT_MSG(overlapPairs_ != nullptr, "PhysicsWorld: overlap pair alloc failed");
 
         // Allocate solver body scratch buffer.
         maxSolverBodies_ = config.maxBodies;
         solverBodies_ = static_cast<SolverBody*>(
             std::malloc(maxSolverBodies_ * sizeof(SolverBody)));
         PULSE_ASSERT_MSG(solverBodies_ != nullptr, "PhysicsWorld: solver body alloc failed");
+
+        // Allocate persistent manifold scratch buffer.
+        maxManifolds_ = config.maxPairs;
+        manifolds_ = static_cast<PersistentManifold*>(
+            std::malloc(maxManifolds_ * sizeof(PersistentManifold)));
+        PULSE_ASSERT_MSG(manifolds_ != nullptr, "PhysicsWorld: manifold array alloc failed");
 
         // Initialize arrays.
         for (uint32_t i = 0; i < shapeCapacity_; ++i) {
@@ -158,8 +163,9 @@ public:
     ~PhysicsWorld() noexcept {
         std::free(shapes_);
         std::free(proxyHandles_);
-        std::free(manifolds_);
+        std::free(overlapPairs_);
         std::free(solverBodies_);
+        std::free(manifolds_);
     }
 
     // Non-copyable.
@@ -192,14 +198,8 @@ public:
         AABB aabb = computeBodyAABB(denseIdx);
         bodyManager_.store().aabb(denseIdx) = aabb;
 
-        BroadPhaseProxy proxy;
-        proxy.fatAABB = makeFatAABB(aabb, config_.broadPhaseConfig.fatMargin);
-        proxy.userData = reinterpret_cast<void*>(static_cast<uintptr_t>(denseIdx));
-        proxy.group = def.collisionLayer;
-        proxy.mask = def.collisionMask;
-        proxy.isSleeping = !def.startAwake;
-
-        ProxyHandle ph = broadphase_.insertProxy(proxy);
+        AABB fatAABB = makeFatAABB(aabb, config_.broadPhaseConfig.fatMargin);
+        ProxyHandle ph = broadphase_.createProxy(fatAABB, denseIdx);
         proxyHandles_[denseIdx] = ph;
 
         return handle;
@@ -216,20 +216,14 @@ public:
         // Remove broadphase proxy.
         ProxyHandle ph = proxyHandles_[denseIdx];
         if (ph.isValid()) {
-            broadphase_.removeProxy(ph);
+            broadphase_.destroyProxy(ph);
         }
 
-        // If not the last element, the last element will be swapped into denseIdx.
-        // We need to update shape/proxy mappings for the moved element.
+        // If not the last element, the last element will be swapped into denseIdx
+        // by BodyManager::destroyBody(). We need to update shape/proxy mappings.
         if (denseIdx != lastDense) {
             shapes_[denseIdx] = shapes_[lastDense];
             proxyHandles_[denseIdx] = proxyHandles_[lastDense];
-
-            // Update the broadphase proxy's userData to point to new dense index.
-            if (proxyHandles_[denseIdx].isValid()) {
-                broadphase_.getProxy(proxyHandles_[denseIdx]).userData =
-                    reinterpret_cast<void*>(static_cast<uintptr_t>(denseIdx));
-            }
         }
 
         // Clear the last slot.
@@ -323,20 +317,25 @@ public:
 
         // ── 4+5. Update broadphase proxies & compute pairs ──────────────
         updateBroadphase(store);
-        const OverlapPair* pairs = broadphase_.getPairs();
-        uint32_t pairCount = broadphase_.getPairCount();
+        uint32_t pairCount = broadphase_.computePairs(overlapPairs_, maxPairs_);
         lastBroadPhasePairs_ = pairCount;
 
-        // ── 6. Run narrowphase on each broadphase pair ──────────────────
-        uint32_t manifoldCount = 0;
-        for (uint32_t p = 0; p < pairCount && manifoldCount < maxManifolds_; ++p) {
-            uint32_t idxA = static_cast<uint32_t>(
-                reinterpret_cast<uintptr_t>(broadphase_.getProxy(pairs[p].a).userData));
-            uint32_t idxB = static_cast<uint32_t>(
-                reinterpret_cast<uintptr_t>(broadphase_.getProxy(pairs[p].b).userData));
+        // ── 6+7. Narrowphase + ContactCache pipeline ────────────────────
+        contactCache_.beginFrame();
 
-            // Skip if either body is sleeping.
+        uint32_t manifoldCount = 0;
+        for (uint32_t p = 0; p < pairCount; ++p) {
+            uint32_t idxA = broadphase_.getUserData(overlapPairs_[p].a);
+            uint32_t idxB = broadphase_.getUserData(overlapPairs_[p].b);
+
+            // Validate indices.
+            if (idxA >= bodyCount || idxB >= bodyCount) continue;
+
+            // Skip if both bodies are sleeping.
             if (store.isSleeping(idxA) && store.isSleeping(idxB)) continue;
+
+            // Skip static-static pairs.
+            if (store.isStatic(idxA) && store.isStatic(idxB)) continue;
 
             // Collision layer/mask filter.
             uint16_t layerA = store.collisionLayer(idxA);
@@ -345,66 +344,68 @@ public:
             uint16_t maskB = store.collisionMask(idxB);
             if ((layerA & maskB) == 0 || (layerB & maskA) == 0) continue;
 
-            // Skip static-static pairs.
-            if (store.isStatic(idxA) && store.isStatic(idxB)) continue;
-
             // Run narrowphase.
             ContactManifold narrowManifold;
             bool hit = runNarrowphase(idxA, idxB, store, narrowManifold);
 
-            if (hit && narrowManifold.pointCount > 0) {
-                // Convert to PersistentManifold.
-                PersistentManifold& pm = manifolds_[manifoldCount];
-                pm = PersistentManifold();
-                pm.bodyIndexA = idxA;
-                pm.bodyIndexB = idxB;
+            if (hit && narrowManifold.numContacts > 0) {
+                // Feed into contact cache for persistence + warm starting.
+                contactCache_.processManifold(idxA, idxB, narrowManifold, config_.contactConfig);
 
-                for (uint32_t c = 0; c < narrowManifold.pointCount && c < 4; ++c) {
-                    pm.contacts[c].localPointA = narrowManifold.points[c].pointOnA;
-                    pm.contacts[c].localPointB = narrowManifold.points[c].pointOnB;
-                    pm.contacts[c].normal = narrowManifold.points[c].normal;
-                    pm.contacts[c].penetration = narrowManifold.points[c].penetration;
-                    pm.contacts[c].normalImpulse = 0.0f;
-                    pm.contacts[c].tangentImpulse0 = 0.0f;
-                    pm.contacts[c].tangentImpulse1 = 0.0f;
+                // Also build a solver-ready manifold.
+                if (manifoldCount < maxManifolds_) {
+                    PersistentManifold& pm = manifolds_[manifoldCount];
+                    pm = PersistentManifold(idxA, idxB);
+
+                    for (uint32_t c = 0; c < narrowManifold.numContacts && c < 4; ++c) {
+                        pm.contacts[c].positionOnA = narrowManifold.points[c].positionOnA;
+                        pm.contacts[c].positionOnB = narrowManifold.points[c].positionOnB;
+                        pm.contacts[c].normal = narrowManifold.points[c].normal;
+                        pm.contacts[c].penetration = narrowManifold.points[c].penetration;
+                        pm.contacts[c].normalImpulse = 0.0f;
+                        pm.contacts[c].tangentImpulse0 = 0.0f;
+                        pm.contacts[c].tangentImpulse1 = 0.0f;
+                    }
+                    pm.contactCount = narrowManifold.numContacts;
+                    if (pm.contactCount > 4) pm.contactCount = 4;
+                    pm.refreshedThisFrame = true;
+
+                    manifoldCount++;
                 }
-                pm.contactCount = narrowManifold.pointCount;
-                if (pm.contactCount > 4) pm.contactCount = 4;
-
-                manifoldCount++;
             }
         }
-        lastManifoldCount_ = manifoldCount;
 
-        // ── 7. ContactCache: match, prune, warm-start ───────────────────
-        // Apply warm-start impulses from cached manifolds.
-        contactCache_.frameUpdate(manifolds_, manifoldCount);
+        // End-of-frame cleanup for contact cache.
+        contactCache_.endFrame();
+
+        // Warm-start impulses from the cache.
+        contactCache_.warmStartAll(config_.contactConfig.warmStartFactor,
+                                   config_.contactConfig.newContactDamping);
+
+        lastManifoldCount_ = manifoldCount;
 
         // ── 8. Build islands ────────────────────────────────────────────
         islandManager_.reset(bodyCount);
         for (uint32_t m = 0; m < manifoldCount; ++m) {
-            uint32_t a = manifolds_[m].bodyIndexA;
-            uint32_t b = manifolds_[m].bodyIndexB;
-            // Only unite non-static bodies.
+            uint32_t a = manifolds_[m].bodyIdA;
+            uint32_t b = manifolds_[m].bodyIdB;
             if (!store.isStatic(a) && !store.isStatic(b)) {
                 islandManager_.unite(a, b);
-            } else if (!store.isStatic(a)) {
-                // Still mark A as part of an island for solving.
-            } else if (!store.isStatic(b)) {
-                // Still mark B as part of an island for solving.
             }
         }
 
-        // Build static/sleeping mask for island building.
+        // Build static/kinematic mask for island building.
         bool* staticMask = static_cast<bool*>(std::malloc(bodyCount * sizeof(bool)));
-        for (std::size_t i = 0; i < bodyCount; ++i) {
-            staticMask[i] = store.isStatic(i) || store.isKinematic(i);
+        if (staticMask) {
+            for (std::size_t i = 0; i < bodyCount; ++i) {
+                staticMask[i] = store.isStatic(i) || store.isKinematic(i);
+            }
+            islandManager_.buildIslands(staticMask);
+            std::free(staticMask);
         }
-        islandManager_.buildIslands(staticMask);
-        std::free(staticMask);
 
         // ── 9. Solve constraints ────────────────────────────────────────
-        // Build solver bodies for ALL bodies (solver indexes by body index).
+        // Build solver bodies for ALL bodies.
         for (std::size_t i = 0; i < bodyCount && i < maxSolverBodies_; ++i) {
             solverBodies_[i] = store.toSolverBody(i);
         }
@@ -433,10 +434,10 @@ public:
         // ── 11. Update sleep state ──────────────────────────────────────
         sleepManager_.updateSleep(store, dt);
 
-        // Wake sleeping bodies that gained new contacts.
+        // Wake sleeping bodies that gained new contacts with awake bodies.
         for (uint32_t m = 0; m < manifoldCount; ++m) {
-            uint32_t a = manifolds_[m].bodyIndexA;
-            uint32_t b = manifolds_[m].bodyIndexB;
+            uint32_t a = manifolds_[m].bodyIdA;
+            uint32_t b = manifolds_[m].bodyIdB;
             if (store.isSleeping(a) && !store.isStatic(b) && !store.isSleeping(b)) {
                 sleepManager_.wakeBody(store, a);
             }
@@ -538,6 +539,8 @@ private:
     ProxyHandle*              proxyHandles_ = nullptr;
 
     // Scratch buffers (re-used each frame).
+    OverlapPair*              overlapPairs_    = nullptr;
+    uint32_t                  maxPairs_        = 0;
     PersistentManifold*       manifolds_       = nullptr;
     uint32_t                  maxManifolds_    = 0;
     SolverBody*               solverBodies_    = nullptr;
@@ -625,19 +628,17 @@ private:
             ProxyHandle ph = proxyHandles_[i];
             if (!ph.isValid()) continue;
 
+            // Skip sleeping bodies for move (they haven't changed position).
+            if (store.isSleeping(i)) continue;
+
             AABB newAABB = computeBodyAABB(static_cast<uint32_t>(i));
             store.aabb(i) = newAABB;
 
             // Compute displacement for predictive fat AABB.
             Vec3 displacement = store.linearVelocity(i) * config_.fixedTimeStep;
-            broadphase_.moveProxy(ph, newAABB, displacement);
-
-            // Update sleep state in proxy.
-            broadphase_.getProxy(ph).isSleeping = store.isSleeping(i);
+            broadphase_.moveProxy(ph, newAABB, displacement,
+                                  config_.broadPhaseConfig.fatMargin);
         }
-
-        // Recompute broadphase overlap pairs.
-        broadphase_.computePairs();
     }
 
     /// Run narrowphase collision between two bodies.
@@ -662,17 +663,16 @@ private:
             return dispatchCollision(seA.shape, seA.type, txA,
                                      seB.shape, seB.type, txB, manifold);
         } else {
-            // Swap order, then flip the manifold normal.
+            // Swap order, then flip the manifold.
             bool hit = dispatchCollision(seB.shape, seB.type, txB,
                                           seA.shape, seA.type, txA, manifold);
             if (hit) {
                 // Flip normals for swapped pair.
-                for (uint32_t c = 0; c < manifold.pointCount; ++c) {
+                for (uint32_t c = 0; c < manifold.numContacts; ++c) {
                     manifold.points[c].normal = manifold.points[c].normal * -1.0f;
-                    // Swap pointOnA and pointOnB.
-                    Vec3 tmp = manifold.points[c].pointOnA;
-                    manifold.points[c].pointOnA = manifold.points[c].pointOnB;
-                    manifold.points[c].pointOnB = tmp;
+                    Vec3 tmp = manifold.points[c].positionOnA;
+                    manifold.points[c].positionOnA = manifold.points[c].positionOnB;
+                    manifold.points[c].positionOnB = tmp;
                 }
             }
             return hit;
@@ -748,12 +748,9 @@ private:
             const PersistentManifold& pm = manifolds_[m];
 
             ContactEvent evt;
-            // Note: bodyA/bodyB handles are not trivially available from dense indices
-            // in the current architecture. We store dense indices as a workaround.
-            // Future: maintain dense→handle reverse lookup in BodyManager.
-            evt.bodyA = BodyHandle(pm.bodyIndexA, 0);  // Approximate — dense index.
-            evt.bodyB = BodyHandle(pm.bodyIndexB, 0);
-            evt.type = ContactEventType::Persist;  // Simplified — all active contacts.
+            evt.bodyA = BodyHandle(pm.bodyIdA, 0);
+            evt.bodyB = BodyHandle(pm.bodyIdB, 0);
+            evt.type = ContactEventType::Persist;
             evt.contactCount = pm.contactCount;
 
             if (pm.contactCount > 0) {
@@ -763,7 +760,7 @@ private:
                 // Average contact point.
                 Vec3 avgPoint = Vec3::zero();
                 for (uint32_t c = 0; c < pm.contactCount; ++c) {
-                    avgPoint += (pm.contacts[c].localPointA + pm.contacts[c].localPointB) * 0.5f;
+                    avgPoint += (pm.contacts[c].positionOnA + pm.contacts[c].positionOnB) * 0.5f;
                 }
                 evt.point = avgPoint * (1.0f / static_cast<float>(pm.contactCount));
 
@@ -778,10 +775,6 @@ private:
             contactCallback_(evt, callbackUserData_);
         }
     }
-
-    // ── gravityScale accessor for integration config ────────────────────
-    // The integrator needs per-body gravity scale. We provide it through
-    // the RigidBodyStore which already stores gravityScales_.
 };
 
 } // namespace pulse
