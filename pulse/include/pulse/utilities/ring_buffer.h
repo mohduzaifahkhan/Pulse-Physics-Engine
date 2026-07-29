@@ -152,7 +152,7 @@ private:
     }
 
     void destroyAt(std::size_t i) noexcept {
-        if constexpr (!std::is_trivially_destructible_v<T>) {
+        if (!std::is_trivially_destructible<T>::value) {
             ptrAt(i)->~T();
         }
     }

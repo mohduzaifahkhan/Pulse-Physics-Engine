@@ -131,7 +131,7 @@ public:
             words_[w] = ~uint64_t(0);
         }
         // Mask out unused bits in the last word.
-        if constexpr (N % 64 != 0) {
+        if (N % 64 != 0) {
             words_[WordCount - 1] &= (uint64_t(1) << (N % 64)) - 1;
         }
     }
@@ -223,7 +223,7 @@ public:
             result.words_[w] = ~words_[w];
         }
         // Mask out unused bits in the last word.
-        if constexpr (N % 64 != 0) {
+        if (N % 64 != 0) {
             result.words_[WordCount - 1] &= (uint64_t(1) << (N % 64)) - 1;
         }
         return result;

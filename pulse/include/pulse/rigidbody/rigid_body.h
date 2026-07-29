@@ -281,7 +281,9 @@ public:
 
     // Material
     [[nodiscard]] PULSE_FORCE_INLINE float restitution(std::size_t i) const noexcept { return restitutions_[i]; }
+    PULSE_FORCE_INLINE void setRestitution(std::size_t i, float r) noexcept { restitutions_[i] = r; }
     [[nodiscard]] PULSE_FORCE_INLINE float friction(std::size_t i) const noexcept { return frictions_[i]; }
+    PULSE_FORCE_INLINE void setFriction(std::size_t i, float f) noexcept { frictions_[i] = f; }
     [[nodiscard]] PULSE_FORCE_INLINE float linearDamping(std::size_t i) const noexcept { return linearDampings_[i]; }
     [[nodiscard]] PULSE_FORCE_INLINE float angularDamping(std::size_t i) const noexcept { return angularDampings_[i]; }
     [[nodiscard]] PULSE_FORCE_INLINE float gravityScale(std::size_t i) const noexcept { return gravityScales_[i]; }

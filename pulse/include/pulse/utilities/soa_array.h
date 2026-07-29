@@ -295,7 +295,7 @@ private:
 
     template <typename T>
     void callDestructor(T* ptr) noexcept {
-        if constexpr (!std::is_trivially_destructible_v<T>) {
+        if (!std::is_trivially_destructible<T>::value) {
             ptr->~T();
         }
     }
@@ -322,7 +322,7 @@ private:
 
     template <typename T>
     static void swapComponent(T* arr, std::size_t a, std::size_t b) noexcept {
-        if constexpr (std::is_trivially_copyable_v<T>) {
+        if (std::is_trivially_copyable<T>::value) {
             unsigned char tmp[sizeof(T)];
             std::memcpy(tmp, arr + a, sizeof(T));
             std::memcpy(arr + a, arr + b, sizeof(T));
@@ -355,7 +355,7 @@ private:
 
         // Copy existing elements.
         if (size_ > 0 && arrays_[I] != nullptr) {
-            if constexpr (std::is_trivially_copyable_v<T>) {
+            if (std::is_trivially_copyable<T>::value) {
                 std::memcpy(newArr, arrays_[I], size_ * sizeof(T));
             } else {
                 T* dst = static_cast<T*>(newArr);

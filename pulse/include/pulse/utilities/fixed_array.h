@@ -219,7 +219,7 @@ public:
         PULSE_ASSERT(i < size_);
         if (i != size_ - 1) {
             // Move last element into the gap.
-            if constexpr (std::is_trivially_copyable_v<T>) {
+            if (std::is_trivially_copyable<T>::value) {
                 std::memcpy(ptrAt(i), ptrAt(size_ - 1), sizeof(T));
             } else {
                 (*ptrAt(i)) = static_cast<T&&>(*ptrAt(size_ - 1));
@@ -287,13 +287,13 @@ private:
     }
 
     PULSE_FORCE_INLINE void destroyAt(std::size_t i) noexcept {
-        if constexpr (!std::is_trivially_destructible_v<T>) {
+        if (!std::is_trivially_destructible<T>::value) {
             ptrAt(i)->~T();
         }
     }
 
     void destroyAll() noexcept {
-        if constexpr (!std::is_trivially_destructible_v<T>) {
+        if (!std::is_trivially_destructible<T>::value) {
             for (std::size_t i = 0; i < size_; ++i) {
                 ptrAt(i)->~T();
             }

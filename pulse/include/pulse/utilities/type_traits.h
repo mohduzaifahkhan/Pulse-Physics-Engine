@@ -98,7 +98,7 @@ struct is_power_of_2 : std::integral_constant<bool, (N > 0) && ((N & (N - 1)) ==
 
 // ── Variable template aliases (_v helpers) ───────────────────────────────────
 
-/// C++17-style _v aliases for convenient use without ::value.
+#if defined(__cpp_inline_variables) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L)
 template <typename T>
 inline constexpr bool is_simd_type_v = is_simd_type<T>::value;
 
@@ -113,6 +113,22 @@ inline constexpr std::size_t alignment_of_v = alignment_of<T>::value;
 
 template <std::size_t N>
 inline constexpr bool is_power_of_2_v = is_power_of_2<N>::value;
+#else
+template <typename T>
+constexpr bool is_simd_type_v = is_simd_type<T>::value;
+
+template <typename T>
+constexpr bool is_pod_type_v = is_pod_type<T>::value;
+
+template <typename T, std::size_t N>
+constexpr bool is_aligned_v = is_aligned<T, N>::value;
+
+template <typename T>
+constexpr std::size_t alignment_of_v = alignment_of<T>::value;
+
+template <std::size_t N>
+constexpr bool is_power_of_2_v = is_power_of_2<N>::value;
+#endif
 
 // ── cache_line_padded ────────────────────────────────────────────────────────
 

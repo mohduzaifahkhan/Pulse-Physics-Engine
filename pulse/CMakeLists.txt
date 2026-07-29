@@ -221,3 +221,14 @@ if(PULSE_BUILD_BENCHMARKS)
     add_executable(pulse_world_bench benchmarks/world_bench.cpp)
     target_link_libraries(pulse_world_bench PRIVATE pulse_world)
 endif()
+
+# ── Apps ───────────────────────────────────────────────
+add_executable(pulse_studio apps/studio/main.cpp)
+target_link_libraries(pulse_studio PRIVATE pulse_world)
+
+# ── Studio GUI (Win32 GDI Application) ────────────────
+if(WIN32)
+    add_executable(pulse_studio_gui WIN32 apps/studio_gui/main_gui.cpp)
+    target_link_libraries(pulse_studio_gui PRIVATE pulse)
+endif()
+
